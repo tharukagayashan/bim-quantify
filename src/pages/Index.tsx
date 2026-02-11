@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import StatsCard from '@/components/StatsCard';
 import UploadZone from '@/components/UploadZone';
 import BuildingHierarchy from '@/components/BuildingHierarchy';
+import ElementList from '@/components/ElementList';
 import IFCViewer from '@/components/IFCViewer';
 import { parseIFCFile, extractIFCGeometry, type IFCBuildingData, type IFCMeshData } from '@/lib/ifc-parser';
 
@@ -75,10 +76,14 @@ const Index = () => {
             <UploadZone onFileSelected={handleFileSelected} isLoading={isLoading} />
           </div>
           <div className="flex-1 overflow-auto">
-            <div className="p-4">
+            <div className="p-4 pb-2">
               <h2 className="text-sm font-semibold text-foreground mb-2">Building Hierarchy</h2>
             </div>
             <BuildingHierarchy data={buildingData} />
+            <div className="p-4 pb-2 border-t border-border mt-2">
+              <h2 className="text-sm font-semibold text-foreground mb-2">Elements</h2>
+            </div>
+            <ElementList elements={buildingData?.elements ?? []} />
           </div>
         </aside>
 

@@ -1,5 +1,13 @@
 import * as WebIFC from 'web-ifc';
 
+export interface IFCElementData {
+  id: number;
+  type: string;
+  name: string;
+  area: number | null;
+  volume: number | null;
+}
+
 export interface IFCBuildingData {
   storeyCount: number;
   storeys: { name: string; elevation: number }[];
@@ -9,7 +17,26 @@ export interface IFCBuildingData {
   projectName: string;
   siteName: string;
   buildingName: string;
+  elements: IFCElementData[];
 }
+
+const ELEMENT_TYPES: { type: number; label: string }[] = [
+  { type: WebIFC.IFCWALL, label: 'IfcWall' },
+  { type: WebIFC.IFCWALLSTANDARDCASE, label: 'IfcWallStandardCase' },
+  { type: WebIFC.IFCSLAB, label: 'IfcSlab' },
+  { type: WebIFC.IFCCOLUMN, label: 'IfcColumn' },
+  { type: WebIFC.IFCBEAM, label: 'IfcBeam' },
+  { type: WebIFC.IFCWINDOW, label: 'IfcWindow' },
+  { type: WebIFC.IFCDOOR, label: 'IfcDoor' },
+  { type: WebIFC.IFCROOF, label: 'IfcRoof' },
+  { type: WebIFC.IFCSTAIR, label: 'IfcStair' },
+  { type: WebIFC.IFCRAILING, label: 'IfcRailing' },
+  { type: WebIFC.IFCCOVERING, label: 'IfcCovering' },
+  { type: WebIFC.IFCPLATE, label: 'IfcPlate' },
+  { type: WebIFC.IFCMEMBER, label: 'IfcMember' },
+  { type: WebIFC.IFCCURTAINWALL, label: 'IfcCurtainWall' },
+  { type: WebIFC.IFCFOOTING, label: 'IfcFooting' },
+];
 
 const STRUCTURAL_TYPES = [
   WebIFC.IFCWALL,
@@ -267,6 +294,28 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
     }
   } catch { /* ignore */ }
 
+  // Extract per-element quantities
+  const elements: IFCElementData[] = [];
+  for (const { type, label } of ELEMENT_TYPES) {
+    try {
+      const ids = ifcApi.GetLineIDsWithType(modelID, type);
+      for (let i = 0; i < ids.size(); i++) {
+        const eid = ids.get(i);
+        try {
+          const line = ifcApi.GetLine(modelID, eid);
+          const name = line?.Name?.value || `${label} #${eid}`;
+          const area = extractQuantityFromPsets(ifcApi, modelID, eid, [
+            'GrossArea', 'NetArea', 'Area', 'GrossSideArea', 'NetSideArea', 'GrossFloorArea', 'NetFloorArea',
+          ]);
+          const volume = extractQuantityFromPsets(ifcApi, modelID, eid, [
+            'NetVolume', 'GrossVolume', 'Volume',
+          ]);
+          elements.push({ id: eid, type: label, name, area, volume });
+        } catch { /* skip element */ }
+      }
+    } catch { /* skip type */ }
+  }
+
   ifcApi.CloseModel(modelID);
 
   return {
@@ -278,6 +327,7 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
     projectName,
     siteName,
     buildingName,
+    elements,
   };
 }
 

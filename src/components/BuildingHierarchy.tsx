@@ -4,9 +4,11 @@ import type { IFCBuildingData } from '@/lib/ifc-parser';
 
 interface BuildingHierarchyProps {
   data: IFCBuildingData | null;
+  selectedStoreyID: number | null;
+  onSelectStorey: (storeyID: number | null) => void;
 }
 
-const BuildingHierarchy = ({ data }: BuildingHierarchyProps) => {
+const BuildingHierarchy = ({ data, selectedStoreyID, onSelectStorey }: BuildingHierarchyProps) => {
   if (!data) {
     return (
       <div className="p-4 text-sm text-muted-foreground text-center">
@@ -36,20 +38,30 @@ const BuildingHierarchy = ({ data }: BuildingHierarchyProps) => {
       </div>
 
       {/* Building */}
-      <div className="hierarchy-item pl-10">
+      <button
+        onClick={() => onSelectStorey(null)}
+        className={`hierarchy-item pl-10 w-full ${selectedStoreyID === null ? 'bg-primary/10 text-primary' : ''}`}
+      >
         <Building2 size={14} />
         <span className="truncate">{data.buildingName}</span>
-      </div>
+        {selectedStoreyID === null && (
+          <span className="ml-auto text-xs font-mono text-primary">All</span>
+        )}
+      </button>
 
       {/* Storeys */}
-      {data.storeys.map((storey, i) => (
-        <div key={i} className="hierarchy-item pl-14">
+      {data.storeys.map((storey) => (
+        <button
+          key={storey.expressID}
+          onClick={() => onSelectStorey(storey.expressID)}
+          className={`hierarchy-item pl-14 w-full ${selectedStoreyID === storey.expressID ? 'bg-primary/10 text-primary' : ''}`}
+        >
           <Layers size={12} />
           <span className="truncate">{storey.name}</span>
           <span className="ml-auto text-xs font-mono text-muted-foreground">
             {storey.elevation.toFixed(1)}m
           </span>
-        </div>
+        </button>
       ))}
     </motion.div>
   );

@@ -40,7 +40,17 @@ const Index = () => {
     const storey = buildingData.storeys.find(s => s.expressID === selectedStoreyID);
     if (!storey) return allMeshes;
     const allowedIDs = new Set(storey.elementIDs);
-    return allMeshes.filter(m => allowedIDs.has(m.expressID));
+    console.log(`[Filter] Storey "${storey.name}" has ${allowedIDs.size} element IDs, total meshes: ${allMeshes.length}`);
+    // Log a sample of mesh expressIDs vs allowed IDs
+    if (allMeshes.length > 0) {
+      const sampleMeshIDs = allMeshes.slice(0, 5).map(m => m.expressID);
+      const sampleAllowedIDs = [...allowedIDs].slice(0, 5);
+      console.log(`[Filter] Sample mesh expressIDs: ${sampleMeshIDs.join(', ')}`);
+      console.log(`[Filter] Sample allowed IDs: ${sampleAllowedIDs.join(', ')}`);
+    }
+    const result = allMeshes.filter(m => allowedIDs.has(m.expressID));
+    console.log(`[Filter] Filtered to ${result.length} meshes`);
+    return result;
   }, [allMeshes, selectedStoreyID, buildingData]);
 
   const formatValue = (val: number | null): string => {

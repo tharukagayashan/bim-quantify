@@ -215,18 +215,30 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
     // Map elements to storeys via IfcRelContainedInSpatialStructure
     try {
       const relIDs = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE);
+      console.log(`[IFC Parser] Found ${relIDs.size()} IfcRelContainedInSpatialStructure relations`);
       for (let i = 0; i < relIDs.size(); i++) {
         try {
-          const rel = ifcApi.GetLine(modelID, relIDs.get(i), true);
+          const rel = ifcApi.GetLine(modelID, relIDs.get(i), false);
           const structureRef = rel.RelatingStructure;
-          const storeyExpressID = typeof structureRef === 'object' && structureRef?.value
+          const storeyExpressID = typeof structureRef === 'object' && structureRef?.value != null
             ? structureRef.value
-            : structureRef;
+            : (typeof structureRef === 'number' ? structureRef : null);
+          
+          if (storeyExpressID == null) continue;
           const storeyData = storeys.find(s => s.expressID === storeyExpressID);
-          if (storeyData && rel.RelatedElements) {
+          if (!storeyData) continue;
+
+          if (rel.RelatedElements) {
             for (const elRef of rel.RelatedElements) {
-              const elID = typeof elRef === 'object' && elRef?.value ? elRef.value : elRef;
-              if (typeof elID === 'number') {
+              let elID: number | null = null;
+              if (typeof elRef === 'object' && elRef?.value != null) {
+                elID = elRef.value;
+              } else if (typeof elRef === 'number') {
+                elID = elRef;
+              } else if (typeof elRef === 'object' && elRef?.expressID != null) {
+                elID = elRef.expressID;
+              }
+              if (elID != null) {
                 storeyData.elementIDs.push(elID);
                 elementToStorey.set(elID, storeyExpressID);
               }
@@ -235,6 +247,47 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
         } catch { continue; }
       }
     } catch { /* ignore */ }
+
+    // Also map via IfcRelAggregates (some elements are aggregated under storeys)
+    try {
+      const aggIDs = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELAGGREGATES);
+      for (let i = 0; i < aggIDs.size(); i++) {
+        try {
+          const rel = ifcApi.GetLine(modelID, aggIDs.get(i), false);
+          const parentRef = rel.RelatingObject;
+          const parentID = typeof parentRef === 'object' && parentRef?.value != null
+            ? parentRef.value
+            : (typeof parentRef === 'number' ? parentRef : null);
+          if (parentID == null) continue;
+          const storeyData = storeys.find(s => s.expressID === parentID);
+          if (!storeyData && !elementToStorey.has(parentID)) continue;
+          
+          // Get the storey this parent belongs to
+          const targetStorey = storeyData || storeys.find(s => s.expressID === elementToStorey.get(parentID));
+          if (!targetStorey) continue;
+
+          if (rel.RelatedObjects) {
+            for (const objRef of rel.RelatedObjects) {
+              let objID: number | null = null;
+              if (typeof objRef === 'object' && objRef?.value != null) {
+                objID = objRef.value;
+              } else if (typeof objRef === 'number') {
+                objID = objRef;
+              }
+              if (objID != null && !elementToStorey.has(objID)) {
+                targetStorey.elementIDs.push(objID);
+                elementToStorey.set(objID, targetStorey.expressID);
+              }
+            }
+          }
+        } catch { continue; }
+      }
+    } catch { /* ignore */ }
+
+    // Log results
+    for (const s of storeys) {
+      console.log(`[IFC Parser] Storey "${s.name}" (ID: ${s.expressID}): ${s.elementIDs.length} elements`);
+    }
   } catch { /* ignore */ }
 
   // Extract GFA from IfcSpace or IfcSlab
@@ -417,6 +470,10 @@ export async function extractIFCGeometry(buffer: ArrayBuffer): Promise<IFCMeshDa
       geom.delete();
     }
   });
+
+  const uniqueIDs = new Set(meshes.map(m => m.expressID));
+  console.log(`[IFC Geometry] Total meshes: ${meshes.length}, unique expressIDs: ${uniqueIDs.size}`);
+  console.log(`[IFC Geometry] Sample expressIDs: ${[...uniqueIDs].slice(0, 10).join(', ')}`);
 
   ifcApi.CloseModel(modelID);
 

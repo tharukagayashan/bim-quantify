@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Box, RotateCcw } from 'lucide-react';
+import { Box } from 'lucide-react';
 import type { IFCMeshData } from '@/lib/ifc-parser';
 
 interface IFCViewerProps {
@@ -12,6 +12,10 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const orbitRef = useRef<{
+    rotX: number; rotY: number; distance: number; target: THREE.Vector3;
+    updateCamera: () => void;
+  } | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -21,16 +25,13 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x12161e);
     sceneRef.current = scene;
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 10000);
     cameraRef.current = camera;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -53,8 +54,9 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
 
     setIsReady(true);
 
-    // Orbit controls (simple implementation)
+    // Orbit controls
     let isDragging = false;
+    let isPanning = false;
     let prevX = 0, prevY = 0;
     let rotX = -0.5, rotY = 0.5;
     let distance = 50;
@@ -69,34 +71,54 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       camera.lookAt(target);
     };
     updateCamera();
+    orbitRef.current = { rotX, rotY, distance, target, updateCamera };
 
     const onMouseDown = (e: MouseEvent) => {
-      isDragging = true;
+      if (e.button === 2 || e.button === 1) {
+        isPanning = true;
+      } else {
+        isDragging = true;
+      }
       prevX = e.clientX;
       prevY = e.clientY;
     };
     const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
+      if (!isDragging && !isPanning) return;
       const dx = e.clientX - prevX;
       const dy = e.clientY - prevY;
-      rotY += dx * 0.005;
-      rotX = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, rotX + dy * 0.005));
+      
+      if (isPanning) {
+        // Pan
+        const panSpeed = distance * 0.002;
+        const right = new THREE.Vector3();
+        const up = new THREE.Vector3();
+        camera.getWorldDirection(new THREE.Vector3());
+        right.setFromMatrixColumn(camera.matrixWorld, 0);
+        up.setFromMatrixColumn(camera.matrixWorld, 1);
+        target.addScaledVector(right, -dx * panSpeed);
+        target.addScaledVector(up, dy * panSpeed);
+      } else {
+        rotY += dx * 0.005;
+        rotX = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, rotX + dy * 0.005));
+      }
       prevX = e.clientX;
       prevY = e.clientY;
       updateCamera();
     };
-    const onMouseUp = () => { isDragging = false; };
+    const onMouseUp = () => { isDragging = false; isPanning = false; };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      distance = Math.max(5, Math.min(200, distance + e.deltaY * 0.05));
+      distance = Math.max(1, Math.min(5000, distance * (1 + e.deltaY * 0.001)));
       updateCamera();
     };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const el = renderer.domElement;
     el.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('contextmenu', onContextMenu);
 
     // Animation loop
     let animId: number;
@@ -124,6 +146,7 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('contextmenu', onContextMenu);
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -136,8 +159,8 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
     if (!sceneRef.current || !cameraRef.current || !isReady) return;
     const scene = sceneRef.current;
 
-    // Remove old meshes (keep lights and grid)
-    const toRemove = scene.children.filter(c => c.type === 'Mesh');
+    // Remove old mesh groups (keep lights, grid, helpers)
+    const toRemove = scene.children.filter(c => c.type === 'Group' || c.type === 'Mesh');
     toRemove.forEach(m => scene.remove(m));
 
     if (meshes.length === 0) return;
@@ -170,10 +193,12 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
-    const camera = cameraRef.current;
-    const dist = maxDim * 1.5;
-    camera.position.set(center.x + dist, center.y + dist * 0.6, center.z + dist);
-    camera.lookAt(center);
+    if (maxDim > 0 && orbitRef.current) {
+      const orbit = orbitRef.current;
+      orbit.target.copy(center);
+      orbit.distance = maxDim * 2;
+      orbit.updateCamera();
+    }
   }, [meshes, isReady]);
 
   return (
@@ -188,7 +213,7 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       )}
       <div className="absolute bottom-3 right-3 flex gap-2">
         <div className="px-2.5 py-1 rounded-md bg-card/80 backdrop-blur border border-border text-xs text-muted-foreground">
-          Drag to rotate • Scroll to zoom
+          Drag to rotate • Right-drag to pan • Scroll to zoom
         </div>
       </div>
     </div>

@@ -8,9 +8,16 @@ export interface IFCElementData {
   volume: number | null;
 }
 
+export interface IFCStoreyData {
+  name: string;
+  elevation: number;
+  expressID: number;
+  elementIDs: number[];
+}
+
 export interface IFCBuildingData {
   storeyCount: number;
-  storeys: { name: string; elevation: number }[];
+  storeys: IFCStoreyData[];
   grossFloorArea: number | null;
   totalVolume: number | null;
   perimeter: number | null;
@@ -189,17 +196,45 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
   } catch { /* ignore */ }
 
   // Extract storeys
-  const storeys: { name: string; elevation: number }[] = [];
+  const storeys: IFCStoreyData[] = [];
+  const elementToStorey = new Map<number, number>(); // elementExpressID -> storeyExpressID
   try {
     const storeyIDs = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCBUILDINGSTOREY);
     for (let i = 0; i < storeyIDs.size(); i++) {
-      const storey = ifcApi.GetLine(modelID, storeyIDs.get(i));
+      const sid = storeyIDs.get(i);
+      const storey = ifcApi.GetLine(modelID, sid);
       storeys.push({
         name: storey.Name?.value || `Storey ${i + 1}`,
         elevation: storey.Elevation?.value ?? 0,
+        expressID: sid,
+        elementIDs: [],
       });
     }
     storeys.sort((a, b) => a.elevation - b.elevation);
+
+    // Map elements to storeys via IfcRelContainedInSpatialStructure
+    try {
+      const relIDs = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE);
+      for (let i = 0; i < relIDs.size(); i++) {
+        try {
+          const rel = ifcApi.GetLine(modelID, relIDs.get(i), true);
+          const structureRef = rel.RelatingStructure;
+          const storeyExpressID = typeof structureRef === 'object' && structureRef?.value
+            ? structureRef.value
+            : structureRef;
+          const storeyData = storeys.find(s => s.expressID === storeyExpressID);
+          if (storeyData && rel.RelatedElements) {
+            for (const elRef of rel.RelatedElements) {
+              const elID = typeof elRef === 'object' && elRef?.value ? elRef.value : elRef;
+              if (typeof elID === 'number') {
+                storeyData.elementIDs.push(elID);
+                elementToStorey.set(elID, storeyExpressID);
+              }
+            }
+          }
+        } catch { continue; }
+      }
+    } catch { /* ignore */ }
   } catch { /* ignore */ }
 
   // Extract GFA from IfcSpace or IfcSlab
@@ -332,6 +367,7 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
 }
 
 export interface IFCMeshData {
+  expressID: number;
   vertices: Float32Array;
   indices: Uint32Array;
   color: { r: number; g: number; b: number; a: number };
@@ -348,6 +384,7 @@ export async function extractIFCGeometry(buffer: ArrayBuffer): Promise<IFCMeshDa
   const meshes: IFCMeshData[] = [];
 
   ifcApi.StreamAllMeshes(modelID, (flatMesh) => {
+    const meshExpressID = flatMesh.expressID;
     for (let i = 0; i < flatMesh.geometries.size(); i++) {
       const placedGeom = flatMesh.geometries.get(i);
       const geom = ifcApi.GetGeometry(modelID, placedGeom.geometryExpressID);
@@ -355,7 +392,6 @@ export async function extractIFCGeometry(buffer: ArrayBuffer): Promise<IFCMeshDa
       const vertexData = ifcApi.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
       const indexData = ifcApi.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
 
-      // Extract positions (every 6 floats: x, y, z, nx, ny, nz)
       const positions = new Float32Array((vertexData.length / 6) * 3);
       for (let v = 0; v < vertexData.length / 6; v++) {
         const srcIdx = v * 6;
@@ -367,6 +403,7 @@ export async function extractIFCGeometry(buffer: ArrayBuffer): Promise<IFCMeshDa
       }
 
       meshes.push({
+        expressID: meshExpressID,
         vertices: positions,
         indices: new Uint32Array(indexData),
         color: {

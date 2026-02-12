@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Ruler, Box, Move, Layers, Building2, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
 import StatsCard from '@/components/StatsCard';
@@ -10,13 +10,15 @@ import { parseIFCFile, extractIFCGeometry, type IFCBuildingData, type IFCMeshDat
 
 const Index = () => {
   const [buildingData, setBuildingData] = useState<IFCBuildingData | null>(null);
-  const [meshes, setMeshes] = useState<IFCMeshData[]>([]);
+  const [allMeshes, setAllMeshes] = useState<IFCMeshData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [selectedStoreyID, setSelectedStoreyID] = useState<number | null>(null);
 
   const handleFileSelected = useCallback(async (file: File) => {
     setIsLoading(true);
     setFileName(file.name);
+    setSelectedStoreyID(null);
     try {
       const buffer = await file.arrayBuffer();
       const [data, geometry] = await Promise.all([
@@ -24,13 +26,22 @@ const Index = () => {
         extractIFCGeometry(buffer),
       ]);
       setBuildingData(data);
-      setMeshes(geometry);
+      setAllMeshes(geometry);
     } catch (error) {
       console.error('Error parsing IFC file:', error);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  // Filter meshes by selected storey
+  const filteredMeshes = useMemo(() => {
+    if (!selectedStoreyID || !buildingData) return allMeshes;
+    const storey = buildingData.storeys.find(s => s.expressID === selectedStoreyID);
+    if (!storey) return allMeshes;
+    const allowedIDs = new Set(storey.elementIDs);
+    return allMeshes.filter(m => allowedIDs.has(m.expressID));
+  }, [allMeshes, selectedStoreyID, buildingData]);
 
   const formatValue = (val: number | null): string => {
     if (val == null) return 'N/A';
@@ -79,7 +90,11 @@ const Index = () => {
             <div className="p-4 pb-2">
               <h2 className="text-sm font-semibold text-foreground mb-2">Building Hierarchy</h2>
             </div>
-            <BuildingHierarchy data={buildingData} />
+            <BuildingHierarchy
+              data={buildingData}
+              selectedStoreyID={selectedStoreyID}
+              onSelectStorey={setSelectedStoreyID}
+            />
             <div className="p-4 pb-2 border-t border-border mt-2">
               <h2 className="text-sm font-semibold text-foreground mb-2">Elements</h2>
             </div>
@@ -91,39 +106,15 @@ const Index = () => {
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Stats Grid */}
           <div className="grid grid-cols-4 gap-4 p-6">
-            <StatsCard
-              title="Gross Floor Area"
-              value={formatValue(buildingData?.grossFloorArea ?? null)}
-              unit="m²"
-              icon={Ruler}
-              delay={0}
-            />
-            <StatsCard
-              title="Total Volume"
-              value={formatValue(buildingData?.totalVolume ?? null)}
-              unit="m³"
-              icon={Box}
-              delay={0.1}
-            />
-            <StatsCard
-              title="Building Perimeter"
-              value={formatValue(buildingData?.perimeter ?? null)}
-              unit="m"
-              icon={Move}
-              delay={0.2}
-            />
-            <StatsCard
-              title="Total Storeys"
-              value={buildingData?.storeyCount ?? 'N/A'}
-              unit="floors"
-              icon={Layers}
-              delay={0.3}
-            />
+            <StatsCard title="Gross Floor Area" value={formatValue(buildingData?.grossFloorArea ?? null)} unit="m²" icon={Ruler} delay={0} />
+            <StatsCard title="Total Volume" value={formatValue(buildingData?.totalVolume ?? null)} unit="m³" icon={Box} delay={0.1} />
+            <StatsCard title="Building Perimeter" value={formatValue(buildingData?.perimeter ?? null)} unit="m" icon={Move} delay={0.2} />
+            <StatsCard title="Total Storeys" value={buildingData?.storeyCount ?? 'N/A'} unit="floors" icon={Layers} delay={0.3} />
           </div>
 
           {/* 3D Viewer */}
           <div className="flex-1 px-6 pb-6">
-            <IFCViewer meshes={meshes} />
+            <IFCViewer meshes={filteredMeshes} />
           </div>
         </main>
       </div>

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Box, Ruler, MousePointerClick, X, Tag } from 'lucide-react';
-import type { IFCMeshData, IFCElementData } from '@/lib/ifc-parser';
+import type { IFCMeshData, IFCElementData, IFCSpaceData } from '@/lib/ifc-parser';
 
 interface IFCViewerProps {
   meshes: IFCMeshData[];
   elements?: IFCElementData[];
+  spaces?: IFCSpaceData[];
 }
 
 // --- Helpers ---
@@ -118,7 +119,7 @@ function createMeasurementLine(p1: THREE.Vector3, p2: THREE.Vector3): THREE.Grou
 
 type MeasureMode = 'none' | 'picking';
 
-const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
+const IFCViewer = ({ meshes, elements = [], spaces = [] }: IFCViewerProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -388,57 +389,48 @@ const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
     meshGroupRef.current = group;
     box.setFromObject(group);
 
-    // Add per-element dimension lines (L × W × H)
-    if (showLabels && elements.length > 0) {
+    // Add space (room) dimension lines — Length × Width only
+    if (showLabels && spaces.length > 0) {
       const dimsGroup = new THREE.Group();
       dimsGroup.userData.isDimension = true;
 
-      for (const el of elements) {
-        const elBox = idToBBox.get(el.id);
-        if (!elBox) continue;
+      for (const space of spaces) {
+        const min = new THREE.Vector3(space.minX, space.minY, space.minZ);
+        const max = new THREE.Vector3(space.maxX, space.maxY, space.maxZ);
+        const sizeX = max.x - min.x;
+        const sizeZ = max.z - min.z;
 
-        const size = elBox.getSize(new THREE.Vector3());
-        // Skip tiny elements (< 0.3m in all dims)
-        if (size.x < 0.3 && size.y < 0.3 && size.z < 0.3) continue;
+        if (sizeX < 0.3 && sizeZ < 0.3) continue;
 
-        const min = elBox.min;
-        const max = elBox.max;
-
-        // Width (X axis) - along bottom front edge
-        if (size.x >= 0.3) {
-          const wLine = createDimensionLine(
+        // Length (X axis) — bottom front edge
+        if (sizeX >= 0.3) {
+          const lLine = createDimensionLine(
             new THREE.Vector3(min.x, min.y, max.z),
             new THREE.Vector3(max.x, min.y, max.z),
-            `${size.x.toFixed(2)}`,
+            `${sizeX.toFixed(2)}`,
             '#22d3ee',
             new THREE.Vector3(0, 0, 0.3)
+          );
+          dimsGroup.add(lLine);
+        }
+
+        // Width (Z axis) — bottom right edge
+        if (sizeZ >= 0.3) {
+          const wLine = createDimensionLine(
+            new THREE.Vector3(max.x, min.y, min.z),
+            new THREE.Vector3(max.x, min.y, max.z),
+            `${sizeZ.toFixed(2)}`,
+            '#34d399',
+            new THREE.Vector3(0.3, 0, 0)
           );
           dimsGroup.add(wLine);
         }
 
-        // Height (Y axis) - along right front edge
-        if (size.y >= 0.3) {
-          const hLine = createDimensionLine(
-            new THREE.Vector3(max.x, min.y, max.z),
-            new THREE.Vector3(max.x, max.y, max.z),
-            `${size.y.toFixed(2)}`,
-            '#a78bfa',
-            new THREE.Vector3(0.3, 0, 0.3).normalize()
-          );
-          dimsGroup.add(hLine);
-        }
-
-        // Depth (Z axis) - along bottom right edge
-        if (size.z >= 0.3) {
-          const dLine = createDimensionLine(
-            new THREE.Vector3(max.x, min.y, min.z),
-            new THREE.Vector3(max.x, min.y, max.z),
-            `${size.z.toFixed(2)}`,
-            '#34d399',
-            new THREE.Vector3(0.3, 0, 0)
-          );
-          dimsGroup.add(dLine);
-        }
+        // Space name label at center
+        const center = min.clone().add(max).multiplyScalar(0.5);
+        const nameSprite = createTextSprite(space.name, '#e2e8f0', 36);
+        nameSprite.position.copy(center);
+        dimsGroup.add(nameSprite);
       }
 
       scene.add(dimsGroup);
@@ -492,7 +484,7 @@ const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
       orbit.distance = maxDim * 2;
       orbit.updateCamera();
     }
-  }, [meshes, elements, isReady, showDimensions, showLabels]);
+  }, [meshes, elements, spaces, isReady, showDimensions, showLabels]);
 
   return (
     <div className="viewer-container relative w-full h-full min-h-[400px]">

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { Box, Ruler, MousePointerClick, X } from 'lucide-react';
-import type { IFCMeshData } from '@/lib/ifc-parser';
+import { Box, Ruler, MousePointerClick, X, Tag } from 'lucide-react';
+import type { IFCMeshData, IFCElementData } from '@/lib/ifc-parser';
 
 interface IFCViewerProps {
   meshes: IFCMeshData[];
+  elements?: IFCElementData[];
 }
 
 // --- Helpers ---
@@ -117,7 +118,7 @@ function createMeasurementLine(p1: THREE.Vector3, p2: THREE.Vector3): THREE.Grou
 
 type MeasureMode = 'none' | 'picking';
 
-const IFCViewer = ({ meshes }: IFCViewerProps) => {
+const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -129,6 +130,7 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
   const meshGroupRef = useRef<THREE.Group | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [showDimensions, setShowDimensions] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   const [measureMode, setMeasureMode] = useState<MeasureMode>('none');
   const measurePointRef = useRef<THREE.Vector3 | null>(null);
   const measurePreviewRef = useRef<THREE.Group | null>(null);
@@ -334,12 +336,12 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
     return () => renderer.domElement.removeEventListener('click', onClick);
   }, [measureMode]);
 
-  // Add meshes and dimension overlays when they change
+  // Add meshes, dimension overlays, and element labels when they change
   useEffect(() => {
     if (!sceneRef.current || !cameraRef.current || !isReady) return;
     const scene = sceneRef.current;
 
-    // Remove old mesh groups and dimensions
+    // Remove old mesh groups, dimensions, and labels
     const toRemove = scene.children.filter(
       c => c.type === 'Group' || c.type === 'Mesh'
     );
@@ -350,6 +352,9 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
 
     const group = new THREE.Group();
     const box = new THREE.Box3();
+
+    // Build a map from expressID -> per-element bounding box center
+    const idToBBox = new Map<number, THREE.Box3>();
 
     meshes.forEach((meshData) => {
       const geometry = new THREE.BufferGeometry();
@@ -366,11 +371,49 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
 
       const mesh = new THREE.Mesh(geometry, material);
       group.add(mesh);
+
+      // Accumulate bounding boxes per expressID
+      geometry.computeBoundingBox();
+      if (geometry.boundingBox) {
+        const existing = idToBBox.get(meshData.expressID);
+        if (existing) {
+          existing.union(geometry.boundingBox);
+        } else {
+          idToBBox.set(meshData.expressID, geometry.boundingBox.clone());
+        }
+      }
     });
 
     scene.add(group);
     meshGroupRef.current = group;
     box.setFromObject(group);
+
+    // Add element quantity labels
+    if (showLabels && elements.length > 0) {
+      const labelsGroup = new THREE.Group();
+      labelsGroup.userData.isDimension = true; // so it gets cleaned up
+
+      for (const el of elements) {
+        const elBox = idToBBox.get(el.id);
+        if (!elBox) continue;
+
+        // Build label text from BaseQuantities
+        const parts: string[] = [];
+        if (el.area != null) parts.push(`A: ${el.area.toFixed(1)}m²`);
+        if (el.volume != null) parts.push(`V: ${el.volume.toFixed(2)}m³`);
+        if (parts.length === 0) continue;
+
+        const labelText = `${el.name}\n${parts.join(' | ')}`;
+        const center = elBox.getCenter(new THREE.Vector3());
+
+        const sprite = createTextSprite(labelText, '#e2e8f0', 32);
+        sprite.position.copy(center);
+        sprite.position.y += 0.3; // slight offset above center
+        labelsGroup.add(sprite);
+      }
+
+      scene.add(labelsGroup);
+    }
 
     // Add bounding box dimensions
     if (showDimensions) {
@@ -378,7 +421,6 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       const max = box.max;
       const sizeVec = box.getSize(new THREE.Vector3());
 
-      // Width (X-axis) - bottom front edge
       const widthLine = createDimensionLine(
         new THREE.Vector3(min.x, min.y, max.z),
         new THREE.Vector3(max.x, min.y, max.z),
@@ -388,7 +430,6 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       );
       scene.add(widthLine);
 
-      // Height (Y-axis) - front right edge
       const heightLine = createDimensionLine(
         new THREE.Vector3(max.x, min.y, max.z),
         new THREE.Vector3(max.x, max.y, max.z),
@@ -398,7 +439,6 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       );
       scene.add(heightLine);
 
-      // Depth (Z-axis) - bottom right edge
       const depthLine = createDimensionLine(
         new THREE.Vector3(max.x, min.y, min.z),
         new THREE.Vector3(max.x, min.y, max.z),
@@ -408,7 +448,6 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       );
       scene.add(depthLine);
 
-      // Bounding box wireframe
       const boxHelper = new THREE.Box3Helper(box, new THREE.Color(0x334155));
       scene.add(boxHelper);
     }
@@ -424,7 +463,7 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
       orbit.distance = maxDim * 2;
       orbit.updateCamera();
     }
-  }, [meshes, isReady, showDimensions]);
+  }, [meshes, elements, isReady, showDimensions, showLabels]);
 
   return (
     <div className="viewer-container relative w-full h-full min-h-[400px]">
@@ -452,6 +491,17 @@ const IFCViewer = ({ meshes }: IFCViewerProps) => {
           title="Toggle bounding box dimensions"
         >
           <Ruler size={16} />
+        </button>
+        <button
+          onClick={() => setShowLabels(l => !l)}
+          className={`p-2 rounded-md backdrop-blur border text-xs transition-colors ${
+            showLabels
+              ? 'bg-primary/20 border-primary/40 text-primary'
+              : 'bg-card/80 border-border text-muted-foreground hover:text-foreground'
+          }`}
+          title="Toggle element quantity labels"
+        >
+          <Tag size={16} />
         </button>
         <button
           onClick={() => {

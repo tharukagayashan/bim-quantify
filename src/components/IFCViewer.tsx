@@ -393,6 +393,16 @@ const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
       const labelsGroup = new THREE.Group();
       labelsGroup.userData.isDimension = true; // so it gets cleaned up
 
+      // Debug: log matching stats
+      const meshIDs = new Set(idToBBox.keys());
+      const elementIDs = new Set(elements.map(e => e.id));
+      const matched = elements.filter(e => idToBBox.has(e.id));
+      console.log(`[Labels] Elements: ${elements.length}, Mesh IDs: ${meshIDs.size}, Matched: ${matched.length}`);
+      if (matched.length === 0 && elements.length > 0) {
+        console.log(`[Labels] Sample element IDs: ${[...elementIDs].slice(0, 5).join(', ')}`);
+        console.log(`[Labels] Sample mesh IDs: ${[...meshIDs].slice(0, 5).join(', ')}`);
+      }
+
       for (const el of elements) {
         const elBox = idToBBox.get(el.id);
         if (!elBox) continue;
@@ -401,14 +411,13 @@ const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
         const parts: string[] = [];
         if (el.area != null) parts.push(`A: ${el.area.toFixed(1)}m²`);
         if (el.volume != null) parts.push(`V: ${el.volume.toFixed(2)}m³`);
-        if (parts.length === 0) continue;
 
-        const labelText = `${el.name}\n${parts.join(' | ')}`;
+        const labelText = parts.length > 0 ? `${el.name} | ${parts.join(' | ')}` : el.name;
         const center = elBox.getCenter(new THREE.Vector3());
 
         const sprite = createTextSprite(labelText, '#e2e8f0', 32);
         sprite.position.copy(center);
-        sprite.position.y += 0.3; // slight offset above center
+        sprite.position.y += 0.3;
         labelsGroup.add(sprite);
       }
 

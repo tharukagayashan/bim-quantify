@@ -15,6 +15,13 @@ export interface IFCStoreyData {
   elementIDs: number[];
 }
 
+export interface IFCSpaceData {
+  id: number;
+  name: string;
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+}
+
 export interface IFCBuildingData {
   storeyCount: number;
   storeys: IFCStoreyData[];
@@ -25,6 +32,7 @@ export interface IFCBuildingData {
   siteName: string;
   buildingName: string;
   elements: IFCElementData[];
+  spaces: IFCSpaceData[];
 }
 
 const ELEMENT_TYPES: { type: number; label: string }[] = [
@@ -404,6 +412,24 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
     } catch { /* skip type */ }
   }
 
+  // Extract IfcSpace bounding boxes for room dimensions
+  const spaces: IFCSpaceData[] = [];
+  try {
+    const spaceIDs = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCSPACE);
+    for (let i = 0; i < spaceIDs.size(); i++) {
+      const sid = spaceIDs.get(i);
+      try {
+        const line = ifcApi.GetLine(modelID, sid);
+        const name = line?.Name?.value || line?.LongName?.value || `Space #${sid}`;
+        const bb = computeBoundingBox(ifcApi, modelID, sid);
+        if (bb) {
+          spaces.push({ id: sid, name, ...bb });
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
+  console.log(`[IFC Parser] Extracted ${spaces.length} IfcSpace bounding boxes`);
+
   ifcApi.CloseModel(modelID);
 
   return {
@@ -416,6 +442,7 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
     siteName,
     buildingName,
     elements,
+    spaces,
   };
 }
 

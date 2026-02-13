@@ -124,7 +124,7 @@ const Index = () => {
 
           {/* 3D Viewer */}
           <div className="flex-1 px-6 pb-6">
-            <IFCViewer meshes={filteredMeshes} elements={buildingData?.elements} />
+            <IFCViewer meshes={filteredMeshes} elements={buildingData?.elements} spaces={buildingData?.spaces} />
           </div>
         </main>
       </div>

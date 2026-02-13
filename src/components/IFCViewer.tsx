@@ -388,40 +388,60 @@ const IFCViewer = ({ meshes, elements = [] }: IFCViewerProps) => {
     meshGroupRef.current = group;
     box.setFromObject(group);
 
-    // Add element quantity labels
+    // Add per-element dimension lines (L × W × H)
     if (showLabels && elements.length > 0) {
-      const labelsGroup = new THREE.Group();
-      labelsGroup.userData.isDimension = true; // so it gets cleaned up
-
-      // Debug: log matching stats
-      const meshIDs = new Set(idToBBox.keys());
-      const elementIDs = new Set(elements.map(e => e.id));
-      const matched = elements.filter(e => idToBBox.has(e.id));
-      console.log(`[Labels] Elements: ${elements.length}, Mesh IDs: ${meshIDs.size}, Matched: ${matched.length}`);
-      if (matched.length === 0 && elements.length > 0) {
-        console.log(`[Labels] Sample element IDs: ${[...elementIDs].slice(0, 5).join(', ')}`);
-        console.log(`[Labels] Sample mesh IDs: ${[...meshIDs].slice(0, 5).join(', ')}`);
-      }
+      const dimsGroup = new THREE.Group();
+      dimsGroup.userData.isDimension = true;
 
       for (const el of elements) {
         const elBox = idToBBox.get(el.id);
         if (!elBox) continue;
 
-        // Build label text from BaseQuantities
-        const parts: string[] = [];
-        if (el.area != null) parts.push(`A: ${el.area.toFixed(1)}m²`);
-        if (el.volume != null) parts.push(`V: ${el.volume.toFixed(2)}m³`);
+        const size = elBox.getSize(new THREE.Vector3());
+        // Skip tiny elements (< 0.3m in all dims)
+        if (size.x < 0.3 && size.y < 0.3 && size.z < 0.3) continue;
 
-        const labelText = parts.length > 0 ? `${el.name} | ${parts.join(' | ')}` : el.name;
-        const center = elBox.getCenter(new THREE.Vector3());
+        const min = elBox.min;
+        const max = elBox.max;
 
-        const sprite = createTextSprite(labelText, '#e2e8f0', 32);
-        sprite.position.copy(center);
-        sprite.position.y += 0.3;
-        labelsGroup.add(sprite);
+        // Width (X axis) - along bottom front edge
+        if (size.x >= 0.3) {
+          const wLine = createDimensionLine(
+            new THREE.Vector3(min.x, min.y, max.z),
+            new THREE.Vector3(max.x, min.y, max.z),
+            `${size.x.toFixed(2)}`,
+            '#22d3ee',
+            new THREE.Vector3(0, 0, 0.3)
+          );
+          dimsGroup.add(wLine);
+        }
+
+        // Height (Y axis) - along right front edge
+        if (size.y >= 0.3) {
+          const hLine = createDimensionLine(
+            new THREE.Vector3(max.x, min.y, max.z),
+            new THREE.Vector3(max.x, max.y, max.z),
+            `${size.y.toFixed(2)}`,
+            '#a78bfa',
+            new THREE.Vector3(0.3, 0, 0.3).normalize()
+          );
+          dimsGroup.add(hLine);
+        }
+
+        // Depth (Z axis) - along bottom right edge
+        if (size.z >= 0.3) {
+          const dLine = createDimensionLine(
+            new THREE.Vector3(max.x, min.y, min.z),
+            new THREE.Vector3(max.x, min.y, max.z),
+            `${size.z.toFixed(2)}`,
+            '#34d399',
+            new THREE.Vector3(0.3, 0, 0)
+          );
+          dimsGroup.add(dLine);
+        }
       }
 
-      scene.add(labelsGroup);
+      scene.add(dimsGroup);
     }
 
     // Add bounding box dimensions

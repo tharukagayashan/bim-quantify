@@ -430,6 +430,58 @@ export async function parseIFCFile(buffer: ArrayBuffer): Promise<IFCBuildingData
   } catch { /* ignore */ }
   console.log(`[IFC Parser] Extracted ${spaces.length} IfcSpace bounding boxes`);
 
+  // Fallback: if no IfcSpace found, generate spaces from storey bounding boxes
+  if (spaces.length === 0 && storeys.length > 0) {
+    console.log(`[IFC Parser] No IfcSpace found, generating spaces from storeys`);
+    for (const storey of storeys) {
+      if (storey.elementIDs.length === 0) continue;
+      let sMinX = Infinity, sMinY = Infinity, sMinZ = Infinity;
+      let sMaxX = -Infinity, sMaxY = -Infinity, sMaxZ = -Infinity;
+      let hasGeom = false;
+      for (const eid of storey.elementIDs) {
+        const bb = computeBoundingBox(ifcApi, modelID, eid);
+        if (bb) {
+          sMinX = Math.min(sMinX, bb.minX); sMinY = Math.min(sMinY, bb.minY); sMinZ = Math.min(sMinZ, bb.minZ);
+          sMaxX = Math.max(sMaxX, bb.maxX); sMaxY = Math.max(sMaxY, bb.maxY); sMaxZ = Math.max(sMaxZ, bb.maxZ);
+          hasGeom = true;
+        }
+      }
+      if (hasGeom) {
+        spaces.push({
+          id: storey.expressID,
+          name: storey.name,
+          minX: sMinX, minY: sMinY, minZ: sMinZ,
+          maxX: sMaxX, maxY: sMaxY, maxZ: sMaxZ,
+        });
+      }
+    }
+    console.log(`[IFC Parser] Generated ${spaces.length} storey-based spaces`);
+  }
+
+  // Final fallback: if still no spaces, use overall model bounding box
+  if (spaces.length === 0) {
+    console.log(`[IFC Parser] No storeys either, using overall model bounding box`);
+    let gMinX = Infinity, gMinY = Infinity, gMinZ = Infinity;
+    let gMaxX = -Infinity, gMaxY = -Infinity, gMaxZ = -Infinity;
+    let hasGeom = false;
+    for (const el of elements) {
+      const bb = computeBoundingBox(ifcApi, modelID, el.id);
+      if (bb) {
+        gMinX = Math.min(gMinX, bb.minX); gMinY = Math.min(gMinY, bb.minY); gMinZ = Math.min(gMinZ, bb.minZ);
+        gMaxX = Math.max(gMaxX, bb.maxX); gMaxY = Math.max(gMaxY, bb.maxY); gMaxZ = Math.max(gMaxZ, bb.maxZ);
+        hasGeom = true;
+      }
+    }
+    if (hasGeom) {
+      spaces.push({
+        id: 0,
+        name: buildingName,
+        minX: gMinX, minY: gMinY, minZ: gMinZ,
+        maxX: gMaxX, maxY: gMaxY, maxZ: gMaxZ,
+      });
+    }
+  }
+
   ifcApi.CloseModel(modelID);
 
   return {

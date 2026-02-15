@@ -115,12 +115,46 @@ const Index = () => {
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-4 p-6">
+          <div className="grid grid-cols-4 gap-4 p-6 pb-2">
             <StatsCard title="Gross Floor Area" value={formatValue(buildingData?.grossFloorArea ?? null)} unit="m²" icon={Ruler} delay={0} />
             <StatsCard title="Total Volume" value={formatValue(buildingData?.totalVolume ?? null)} unit="m³" icon={Box} delay={0.1} />
             <StatsCard title="Building Perimeter" value={formatValue(buildingData?.perimeter ?? null)} unit="m" icon={Move} delay={0.2} />
             <StatsCard title="Total Storeys" value={buildingData?.storeyCount ?? 'N/A'} unit="floors" icon={Layers} delay={0.3} />
           </div>
+
+          {/* Per-Storey Floor Area Breakdown */}
+          {buildingData && buildingData.storeys.length > 0 && (
+            <motion.div
+              className="mx-6 mb-4 p-3 rounded-lg border border-border bg-card/50"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.4 }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Layers size={14} className="text-primary" />
+                <span className="text-xs font-semibold text-foreground">Floor Area by Storey</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                {buildingData.storeys.map((storey) => {
+                  const space = buildingData.spaces?.find(s => s.id === storey.expressID);
+                  const area = space
+                    ? (space.maxX - space.minX) * (space.maxZ - space.minZ)
+                    : null;
+                  return (
+                    <div
+                      key={storey.expressID}
+                      className="flex flex-col px-2.5 py-1.5 rounded-md bg-secondary/50 text-xs"
+                    >
+                      <span className="text-muted-foreground truncate">{storey.name}</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {area != null ? formatValue(area) + ' m²' : 'N/A'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
 
           {/* 3D Viewer */}
           <div className="flex-1 px-6 pb-6">

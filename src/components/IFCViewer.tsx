@@ -426,11 +426,17 @@ const IFCViewer = ({ meshes, elements = [], spaces = [] }: IFCViewerProps) => {
           dimsGroup.add(wLine);
         }
 
-        // Space name label at center
+        // Space name + area label at center
         const center = min.clone().add(max).multiplyScalar(0.5);
+        const area = sizeX * sizeZ;
         const nameSprite = createTextSprite(space.name, '#e2e8f0', 36);
         nameSprite.position.copy(center);
         dimsGroup.add(nameSprite);
+
+        const areaSprite = createTextSprite(`${area.toFixed(2)} m²`, '#f59e0b', 32);
+        areaSprite.position.copy(center);
+        areaSprite.position.y -= 1.2;
+        dimsGroup.add(areaSprite);
       }
 
       scene.add(dimsGroup);

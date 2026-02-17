@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Ruler, Box, Move, Layers, Building2, Activity } from 'lucide-react';
+import { Ruler, Box, Move, Layers, Building2, Activity, Pencil, Check, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import StatsCard from '@/components/StatsCard';
 import UploadZone from '@/components/UploadZone';
@@ -14,6 +14,9 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [selectedStoreyID, setSelectedStoreyID] = useState<number | null>(null);
+  const [areaOverrides, setAreaOverrides] = useState<Record<number, number>>({});
+  const [editingStoreyID, setEditingStoreyID] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState('');
 
   const handleFileSelected = useCallback(async (file: File) => {
     setIsLoading(true);
@@ -52,6 +55,43 @@ const Index = () => {
     console.log(`[Filter] Filtered to ${result.length} meshes`);
     return result;
   }, [allMeshes, selectedStoreyID, buildingData]);
+
+  const getStoreyArea = (storeyExpressID: number): number | null => {
+    if (areaOverrides[storeyExpressID] != null) return areaOverrides[storeyExpressID];
+    if (!buildingData) return null;
+    const space = buildingData.spaces?.find(s => s.id === storeyExpressID);
+    if (!space) return null;
+    return (space.maxX - space.minX) * (space.maxZ - space.minZ);
+  };
+
+  const totalOverriddenGFA = useMemo(() => {
+    if (!buildingData) return null;
+    let total = 0;
+    for (const storey of buildingData.storeys) {
+      const area = getStoreyArea(storey.expressID);
+      if (area != null) total += area;
+    }
+    return total;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingData, areaOverrides]);
+
+  const handleStartEdit = (storeyID: number) => {
+    const current = getStoreyArea(storeyID);
+    setEditValue(current != null ? current.toFixed(2) : '');
+    setEditingStoreyID(storeyID);
+  };
+
+  const handleConfirmEdit = (storeyID: number) => {
+    const parsed = parseFloat(editValue);
+    if (!isNaN(parsed) && parsed >= 0) {
+      setAreaOverrides(prev => ({ ...prev, [storeyID]: parsed }));
+    }
+    setEditingStoreyID(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingStoreyID(null);
+  };
 
   const formatValue = (val: number | null): string => {
     if (val == null) return 'N/A';
@@ -116,7 +156,7 @@ const Index = () => {
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Stats Grid */}
           <div className="grid grid-cols-4 gap-4 p-6 pb-2">
-            <StatsCard title="Gross Floor Area" value={formatValue(buildingData?.grossFloorArea ?? null)} unit="m²" icon={Ruler} delay={0} />
+            <StatsCard title="Gross Floor Area" value={formatValue(totalOverriddenGFA ?? buildingData?.grossFloorArea ?? null)} unit="m²" icon={Ruler} delay={0} />
             <StatsCard title="Total Volume" value={formatValue(buildingData?.totalVolume ?? null)} unit="m³" icon={Box} delay={0.1} />
             <StatsCard title="Building Perimeter" value={formatValue(buildingData?.perimeter ?? null)} unit="m" icon={Move} delay={0.2} />
             <StatsCard title="Total Storeys" value={buildingData?.storeyCount ?? 'N/A'} unit="floors" icon={Layers} delay={0.3} />
@@ -133,22 +173,52 @@ const Index = () => {
               <div className="flex items-center gap-2 mb-2">
                 <Layers size={14} className="text-primary" />
                 <span className="text-xs font-semibold text-foreground">Floor Area by Storey</span>
+                <span className="text-[10px] text-muted-foreground ml-1">(click pencil to edit)</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {buildingData.storeys.map((storey) => {
-                  const space = buildingData.spaces?.find(s => s.id === storey.expressID);
-                  const area = space
-                    ? (space.maxX - space.minX) * (space.maxZ - space.minZ)
-                    : null;
+                  const area = getStoreyArea(storey.expressID);
+                  const isEditing = editingStoreyID === storey.expressID;
+                  const isOverridden = areaOverrides[storey.expressID] != null;
                   return (
                     <div
                       key={storey.expressID}
-                      className="flex flex-col px-2.5 py-1.5 rounded-md bg-secondary/50 text-xs"
+                      className={`group flex flex-col px-2.5 py-1.5 rounded-md text-xs ${isOverridden ? 'bg-primary/10 border border-primary/20' : 'bg-secondary/50'}`}
                     >
                       <span className="text-muted-foreground truncate">{storey.name}</span>
-                      <span className="font-mono font-semibold text-foreground">
-                        {area != null ? formatValue(area) + ' m²' : 'N/A'}
-                      </span>
+                      {isEditing ? (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <input
+                            type="number"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleConfirmEdit(storey.expressID);
+                              if (e.key === 'Escape') handleCancelEdit();
+                            }}
+                            className="w-full bg-background border border-border rounded px-1 py-0.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                            autoFocus
+                          />
+                          <button onClick={() => handleConfirmEdit(storey.expressID)} className="text-primary hover:text-primary/80">
+                            <Check size={12} />
+                          </button>
+                          <button onClick={handleCancelEdit} className="text-muted-foreground hover:text-foreground">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-mono font-semibold text-foreground">
+                            {area != null ? formatValue(area) + ' m²' : 'N/A'}
+                          </span>
+                          <button
+                            onClick={() => handleStartEdit(storey.expressID)}
+                            className="opacity-0 group-hover:opacity-100 hover:text-primary text-muted-foreground transition-opacity"
+                          >
+                            <Pencil size={10} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
